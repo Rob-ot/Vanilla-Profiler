@@ -1,16 +1,10 @@
 fs = require 'fs'
+crypto = require 'crypto'
 
 esprima = require 'esprima'
 escodegen = require 'escodegen'
 _ = require 'lodash'
 
-if !process.argv[2]
-  console.error "Please specify an input file, e.g: coffee app.coffee input.js"
-  process.exit()
-
-source = fs.readFileSync(process.argv[2]).toString()
-
-ast = esprima.parse source
 
 collapseDotNotations = (node) ->
   if node.object
@@ -21,7 +15,9 @@ collapseDotNotations = (node) ->
 handle = (node) ->
   niceName = ""
   if node.type is 'FunctionExpression'
-    niceName = if node.parent.id
+    niceName = if node.id?.name
+      node.id.name
+    else if node.parent.id
       node.parent.id.name
     else if node.parent.left
       collapseDotNotations node.parent.left
@@ -30,8 +26,8 @@ handle = (node) ->
         node.parent.parent.parent.id.name + "." + node.parent.key.name
       else
         node.parent.key.name
-
-    niceName or= "<anonymous>"
+    else
+      "<anonymous>"
 
     if node.parent.type in ['Property', 'AssignmentExpression', 'CallExpression', 'VariableDeclarator']
       return  {
@@ -41,10 +37,8 @@ handle = (node) ->
           "name": "__profile"
         },
         "arguments": [
-          {
-            "type": "Literal",
-            "value": niceName
-          },
+          {"type": "Literal", "value": niceName},
+          {"type": "Literal", "value": node.range.join(",")},
           node
         ]
       }
@@ -52,8 +46,29 @@ handle = (node) ->
   else if node.type is 'FunctionDeclaration'
     # To cope with hoisting we hijack the fn at the top of its scope
     name = node.id.name
-    profileNode = esprima.parse("#{name} = __profile('#{name}', #{name})").body[0]
-    node.parent.body.unshift profileNode
+    node.parent.body.unshift {
+      "type": "ExpressionStatement",
+      "expression": {
+        "type": "AssignmentExpression",
+        "operator": "=",
+        "left": {
+          "type": "Identifier",
+          "name": name
+        },
+        "right": {
+          "type": "CallExpression",
+          "callee": {
+            "type": "Identifier",
+            "name": "__profile"
+          },
+          "arguments": [
+            {"type": "Literal", "value": name},
+            {"type": "Literal", "value": node.range.join(",")},
+            {"type": "Identifier", "name": name}
+          ]
+        }
+      }
+    }
 
   return undefined
 
@@ -82,22 +97,45 @@ map = (node, parent=null) ->
 
   return handle node
 
-map ast
+profile = ({date, checksum}) ->
+  (name, range, fn) ->
+    # TODO: awesome stuff
+    newFn = ->
+      start = Date.now()
+      __callStack.push name
+      ret = fn.apply this, arguments
+      console.log Date.now() - start, __callStack.join(" > ")
+      __callStack.pop()
+      return ret
 
-profile = (name, fn) ->
-  # TODO: awesome stuff
-  newFn = ->
-    start = Date.now()
-    __callStack.push name
-    ret = fn.apply this, arguments
-    console.log Date.now() - start, __callStack.join(" > ")
-    __callStack.pop()
-    return ret
+    newFn.length = fn.length
+    newFn.name = fn.name
+    return newFn
 
-  newFn.length = fn.length
-  newFn.name = fn.name
-  return newFn
 
-output = escodegen.generate ast
+transform = (source) ->
+  opts =
+    date: new Date()
 
-fs.writeFileSync "./output.js", ("__callStack = [];\n__profile = " + profile.toString() + "\n\n" + output)
+  hash = crypto.createHash 'md5'
+  hash.update source
+  opts.checksum = hash.digest 'hex'
+
+  ast = esprima.parse source, range: true
+  # console.log JSON.stringify(ast)
+  map ast
+
+  output = escodegen.generate ast
+  return """
+    var __callStack = [];
+    var __profile = #{profile.toString()}(#{JSON.stringify(opts)});
+
+    #{output}
+  """
+
+
+if !process.argv[2]
+  console.error "Please specify an input file, e.g: coffee app.coffee input.js"
+  process.exit()
+
+fs.writeFileSync "./output.js", transform fs.readFileSync(process.argv[2]).toString()
