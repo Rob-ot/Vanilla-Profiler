@@ -26,19 +26,19 @@ handle = (node) ->
         node.parent.parent.parent.id.name + "." + node.parent.key.name
       else
         node.parent.key.name
-    else
-      "<anonymous>"
+
+    niceName or= "<anonymous>"
 
     if node.parent.type in ['Property', 'AssignmentExpression', 'CallExpression', 'VariableDeclarator']
       return  {
-        "type": "CallExpression",
+        "type": "CallExpression"
         "callee": {
-          "type": "Identifier",
+          "type": "Identifier"
           "name": "__profile"
         },
         "arguments": [
-          {"type": "Literal", "value": niceName},
-          {"type": "Literal", "value": node.range.join(",")},
+          {"type": "Literal", "value": niceName}
+          {"type": "Literal", "value": node.range.join(",")}
           node
         ]
       }
@@ -47,23 +47,23 @@ handle = (node) ->
     # To cope with hoisting we hijack the fn at the top of its scope
     name = node.id.name
     node.parent.body.unshift {
-      "type": "ExpressionStatement",
+      "type": "ExpressionStatement"
       "expression": {
-        "type": "AssignmentExpression",
-        "operator": "=",
+        "type": "AssignmentExpression"
+        "operator": "="
         "left": {
-          "type": "Identifier",
+          "type": "Identifier"
           "name": name
         },
         "right": {
-          "type": "CallExpression",
+          "type": "CallExpression"
           "callee": {
-            "type": "Identifier",
+            "type": "Identifier"
             "name": "__profile"
           },
           "arguments": [
-            {"type": "Literal", "value": name},
-            {"type": "Literal", "value": node.range.join(",")},
+            {"type": "Literal", "value": name}
+            {"type": "Literal", "value": node.range.join(",")}
             {"type": "Identifier", "name": name}
           ]
         }
